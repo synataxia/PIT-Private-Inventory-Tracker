@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PIT, Private Inventory Tracker</title>
+  <style>
+    :root{--bg:#f7f6f2;--surface:#f9f8f5;--surface2:#fbfbf9;--text:#28251d;--muted:#66635d;--primary:#01696f;--primary2:#0c4e54;--radius:.75rem}
+    body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;margin:0;padding:1rem}
+    .container{display:grid;gap:1rem;max-width:1200px}
+    .panel{background:var(--surface);border-radius:var(--radius);padding:1rem;border:1px solid #ddd}
+    input,select,textarea{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:.5rem;margin:.25rem 0}
+    button{background:var(--primary);color:white;padding:.5rem 1rem;border:none;border-radius:.5rem;cursor:pointer;margin:.25rem}
+    button:hover{background:var(--primary2)}
+    .grid{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+    .state{padding:.75rem;background:#e8f5e9;border-radius:.5rem;margin:.5rem 0}
+    .history li{padding:.5rem;background:var(--surface2);margin:.25rem 0;border-radius:.25rem}
+    .item{display:grid;grid-template-columns:auto 1fr auto;gap:.5rem;padding:.5rem;background:var(--surface2);margin:.25rem 0;border-radius:.25rem}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="panel">
+    <h1>PIT, Private Inventory Tracker</h1>
+    <p>Track collections with barcode lookup and quick inventory addition.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Scan and Add</h2>
+    <div class="grid">
+      <div>
+        <label>Barcode</label>
+        <input id="barcodeInput" inputmode="numeric" placeholder="Scan or type UPC / EAN / ISBN" />
+      </div>
+      <div>
+        <label>Lookup Source</label>
+        <select id="sourceSelect">
+          <option value="auto">Auto</option>
+          <option value="upc">UPC / Product</option>
+          <option value="isbn">ISBN / Books</option>
+        </select>
+      </div>
+      <div>
+        <label>Quick Add Mode</label>
+        <select id="quickAddMode">
+          <option value="replace">Replace fields</option>
+          <option value="append">Append only missing</option>
+        </select>
+      </div>
+    </div>
+    <button id="lookupBtn">Lookup</button>
+    <div id="lookupState" class="state">Ready to lookup barcode.</div>
+    <span id="lookupBadge">Awaiting barcode</span>
+  </div>
+
+  <div class="panel">
+    <h2>Item Details</h2>
+    <div class="grid">
+      <div><label>Item Name</label><input id="nameInput" /></div>
+      <div><label>Brand/Maker</label><input id="brandInput" /></div>
+      <div><label>Category</label><input id="categoryInput" /></div>
+      <div><label>Quantity</label><input id="quantityInput" type="number" value="1" min="1" /></div>
+    </div>
+    <label>Notes</label>
+    <textarea id="notesInput" placeholder="Condition, shelf, variant, duplicate"></textarea>
+    <label>Location</label>
+    <input id="locationInput" placeholder="Shelf, bin, room, box" />
+    <label>Duplicate/Variant</label>
+    <input id="duplicateInput" placeholder="Original, duplicate, alt cover, sealed" />
+    <div style="margin-top:1rem">
+      <button id="saveBtn">Save Item</button>
+      <button id="saveNextBtn">Save & Ready Next Scan</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Current Result</h2>
+    <div id="currentResult">No lookup yet.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Collection</h2>
+    <div id="collectionWrap"><p>No items saved yet.</p></div>
+  </div>
+
+  <div class="panel">
+    <h2>Recent Scans</h2>
+    <ul id="historyList" class="history"></ul>
+  </div>
+
+
+  <div class="panel">
+    <h2>Actions</h2>
+    <button id="seedBtn">Load Sample Data</button>
+    <button id="exportJsonBtn">Export JSON</button>
+    <button id="exportCsvBtn">Export CSV</button>
+    <button id="importBtn">Import</button>
+    <input id="fileInput" type="file" accept=".json,.csv" hidden />
+    <button id="clearBtn">Clear All</button>
+  </div>
+  <div class="panel">
+    <p><small>Works offline with local storage. Lookup uses public APIs: UPCitemdb, Open Food Facts, Open Library.</small></p>
+  </div>
+</div><script>
+(() => {
+  refs.lookupBtn.addEventListener('click', () => { const c = refs.barcode.value.trim(); if(c) lookupBarcode(c); else status('Enter barcode.'); });
+  refs.barcode.addEventListener('keydown', e => { if(e.key==='Enter') { e.preventDefault(); const c = refs.barcode.value.trim(); if(c) lookupBarcode(c); } });
+  $('saveBtn').addEventListener('click', saveItem);
+  $('saveNextBtn').addEventListener('click', () => { saveItem(); refs.barcode.value=''; fillForm({}); });
+  $('seedBtn').addEventListener('click', () => { state.items = [{barcode:'4902778912345',name:'Marker Set',brand:'Uni',category:'Art',quantity:2},{barcode:'9780140328721',name:'Matilda',brand:'Puffin',category:'Books',quantity:1}]; renderCollection(); status('Sample loaded.'); });
+  $('exportJsonBtn').addEventListener('click', () => { const b = new Blob([JSON.stringify(state.items)],{type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'pit-export.json'; a.click(); });
+  $('exportCsvBtn').addEventListener('click', () => { const csv = 'barcode,name,brand,category,quantity
+' + state.items.map(i => `${i.barcode},${i.name},${i.brand},${i.category},${i.quantity}`).join('
+'); const b = new Blob([csv],{type:'text/csv'}); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'pit-export.csv'; a.click(); });
+  $('importBtn').addEventListener('click', () => refs.fileInput.click());
+  refs.fileInput.addEventListener('change', e => { const f = e.target.files[0]; if(!f) return; const t = f.text(); if(f.name.endsWith('.json')) { const d = JSON.parse(t); state.items = [...d,...state.items]; } renderCollection(); status('Imported.'); });
+  $('clearBtn').addEventListener('click', () => { state.items = []; state.history = []; renderCollection(); status('Cleared.'); });
+
+  renderCollection();
+})();
+</script>
+</body>
+</html>
